@@ -1,0 +1,102 @@
+import numpy as np
+import pandas as pd
+
+# Function to calculate a rolling transition matrix for market states
+def calculate_rolling_transition_matrix(prices, window_size=5000000, states=2, step=500):
+    """
+    Computes a rolling transition matrix for a given price series.
+    
+    Parameters:
+        prices (pd.Series or pd.DataFrame): The price series (must have a 'Close' column if DataFrame).
+        window_size (int): The number of data points to include in each rolling window.
+        states (int): Number of market states (e.g., up or down for 2 states).
+        step (int): The step size for rolling the window.
+    
+    Returns:
+        pd.DataFrame: A DataFrame containing transition probabilities over time.
+    """
+    if isinstance(prices, pd.Series):
+        prices = pd.DataFrame(prices, columns=['Close'])
+    
+    # Compute percentage returns
+    returns = prices['Close'].pct_change().dropna()
+    window_size = min(window_size, len(returns))  # Ensure window size is within bounds
+    
+    results = []  # Store computed transition matrices
+    timestamps = []  # Store corresponding timestamps
+    
+    # Iterate through rolling windows
+    for i in range(0, len(returns) - window_size + 1, step):
+        window = returns.iloc[i:i+window_size]
+        
+        try:
+            # Classify states: 1 for positive return, 0 for negative return
+            state_sequence = np.where(window.values > 0, 1, 0)
+            
+            # Compute transition counts
+            transition_counts = np.zeros((states, states), dtype=int)
+            for j in range(len(state_sequence) - 1):
+                transition_counts[state_sequence[j], state_sequence[j+1]] += 1
+            
+            # Compute transition probabilities
+            transition_matrix = transition_counts / transition_counts.sum(axis=1, keepdims=True)
+            
+            # Store results
+            results.append(transition_matrix.flatten())
+            timestamps.append(returns.index[i+window_size-1])
+        
+        except Exception as e:
+            print(f"Error in window {i}: {e}")
+            break  # Exit loop on error
+        
+        # Avoid excessive computation
+        if len(results) > 50000000:
+            break
+    
+    # Create DataFrame with transition probabilities
+    columns = [f'P{i+1}_{j+1}' for i in range(states) for j in range(states)]
+    rolling_df = pd.DataFrame(results, columns=columns, index=timestamps)
+    
+    return rolling_df
+
+# Function to find the column with the highest transition probability
+def get_max_column_precise0(row):
+    """
+    Determines the column with the highest probability in a given row.
+    
+    Parameters:
+        row (pd.Series): A row from the transition matrix DataFrame.
+    
+    Returns:
+        str: Column name with the highest probability.
+    """
+    columns = ['P1_1', 'P1_2', 'P2_1', 'P2_2']
+    return max(columns, key=lambda col: row[col])
+
+# Function to validate that max_column is correctly identified
+def validate_max_columns0(df):
+    """
+    Validates whether the computed max_column is correct for each row.
+    
+    Parameters:
+        df (pd.DataFrame): DataFrame containing transition probabilities and the max_column.
+    """
+    columns = ['P1_1', 'P1_2', 'P2_1', 'P2_2']
+    for index, row in df.iterrows():
+        max_value = max(row[col] for col in columns)
+        max_cols = [col for col in columns if row[col] == max_value]
+        
+        if row['max_column'] not in max_cols:
+            print(f"Inconsistency at {index}")
+            for col in columns:
+                print(f"{col}: {row[col]}")
+            print(f"Current max_column: {row['max_column']}")
+            print(f"Correct max_columns: {max_cols}\n")
+
+  """
+    Transition Definitions:
+        - P1_1: Probability of remaining in state 1 (uptrend → uptrend).
+        - P1_2: Probability of transitioning from state 1 to state 2 (uptrend → downtrend).
+        - P2_1: Probability of transitioning from state 2 to state 1 (downtrend → uptrend).
+        - P2_2: Probability of remaining in state 2 (downtrend → downtrend).
+    """
